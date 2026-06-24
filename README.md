@@ -1,6 +1,6 @@
 # joinstr-seedsigner
 
-Sign [joinstr](https://gitlab.com/1440000bytes/joinstr) coinjoins with a [SeedSigner](https://github.com/SeedSigner/seedsigner) air-gapped signer, driven on the desktop [SeedSigner emulator](https://github.com/enteropositivo/seedsigner-emulator).
+Sign [joinstr](https://gitlab.com/invincible-privacy/joinstr) coinjoins with a [SeedSigner](https://github.com/SeedSigner/seedsigner) air-gapped signer, driven on the desktop [SeedSigner emulator](https://github.com/enteropositivo/seedsigner-emulator).
 
 joinstr's `joinstrd` daemon does all the networked work (nostr, Tor, Bitcoin Core, PSBT combine/finalize). SeedSigner only verifies and signs the coinjoin PSBT. Its `POST /pool/register-input` already takes an *already-signed* PSBT, so SeedSigner drops in where a hot wallet used to sign, with no changes to joinstr.
 
@@ -17,7 +17,7 @@ The glue here builds each peer's single-input PSBT (1 input, all participants' e
 ## Setup
 
 ```sh
-git clone https://gitlab.com/1440000bytes/joinstr.git
+git clone https://gitlab.com/invincible-privacy/joinstr.git
 git clone https://github.com/SeedSigner/seedsigner.git
 git clone https://github.com/enteropositivo/seedsigner-emulator.git
 

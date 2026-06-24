@@ -1,0 +1,11 @@
+# third-party clones (see README setup)
+emulator/
+joinstr/
+
+# python
+__pycache__/
+*.pyc
+
+# scratch
+shot_home.png
+cap/

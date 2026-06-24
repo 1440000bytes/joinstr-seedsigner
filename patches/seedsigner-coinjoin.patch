@@ -1,0 +1,188 @@
+diff --git a/src/seedsigner/gui/screens/psbt_screens.py b/src/seedsigner/gui/screens/psbt_screens.py
+index 973d3ec..cef4f92 100644
+--- a/src/seedsigner/gui/screens/psbt_screens.py
++++ b/src/seedsigner/gui/screens/psbt_screens.py
+@@ -783,3 +783,41 @@ class PSBTFinalizeScreen(ButtonListScreen):
+             text=_("Click to approve this transaction"),
+             screen_y=icon.screen_y + icon.height + 2*GUIConstants.COMPONENT_PADDING
+         ))
++
++
++
++@dataclass
++class PSBTCoinjoinOverviewScreen(ButtonListScreen):
++    """joinstr coinjoin verification: show per-peer figures, not a normal spend."""
++    num_participants: int = 0
++    my_input: int = 0
++    my_output: int = 0
++    my_fee: int = 0
++    denomination: int = 0
++
++    def __post_init__(self):
++        self.title = _("CoinJoin")
++        self.is_bottom_list = True
++        super().__post_init__()
++
++        screen_y = self.top_nav.height + GUIConstants.COMPONENT_PADDING
++
++        # compact single-row lines so all figures fit above the Sign button
++        fee_str = f"{self.my_fee:,} sat" if self.my_fee is not None else _("unknown")
++        out_str = f"{self.my_output:,} sat" if self.my_output is not None else _("unknown")
++        lines = [
++            _("{n} participants @ {d:,} sat").format(n=self.num_participants, d=self.denomination),
++            _("your input:  {v:,} sat").format(v=self.my_input),
++            _("your output: {v}").format(v=out_str),
++            _("your fee:    {v}").format(v=fee_str),
++        ]
++        for line in lines:
++            self.components.append(TextArea(
++                text=line,
++                font_name=GUIConstants.FIXED_WIDTH_FONT_NAME,
++                font_size=GUIConstants.get_body_font_size(),
++                is_text_centered=False,
++                screen_x=GUIConstants.EDGE_PADDING,
++                screen_y=screen_y,
++            ))
++            screen_y = self.components[-1].screen_y + self.components[-1].height + GUIConstants.COMPONENT_PADDING
+diff --git a/src/seedsigner/models/decode_qr.py b/src/seedsigner/models/decode_qr.py
+index 6a2b2d2..96a0097 100644
+--- a/src/seedsigner/models/decode_qr.py
++++ b/src/seedsigner/models/decode_qr.py
+@@ -319,7 +319,8 @@ class DecodeQR:
+         if image is None:
+             return None
+ 
+-        barcodes = pyzbar.decode(image, symbols=[ZBarSymbol.QRCODE], binary=is_binary)
++        # standard pyzbar has no binary= kwarg (only the emulator's fork does)
++        barcodes = pyzbar.decode(image, symbols=[ZBarSymbol.QRCODE])
+ 
+         # if barcodes:
+             # print("--------------- extract_qr_data ---------------")
+diff --git a/src/seedsigner/models/psbt_parser.py b/src/seedsigner/models/psbt_parser.py
+index 6f12609..fc1eee1 100644
+--- a/src/seedsigner/models/psbt_parser.py
++++ b/src/seedsigner/models/psbt_parser.py
+@@ -36,6 +36,10 @@ class PSBTParser():
+         self.destination_amounts = []
+         self.op_return_data: bytes = None
+ 
++        # joinstr coinjoin awareness
++        self.is_coinjoin = False
++        self.coinjoin_summary = None
++
+         self.root = None
+ 
+         if self.seed is not None:
+@@ -91,6 +95,8 @@ class PSBTParser():
+         if rt == False:
+             return False
+ 
++        self._detect_coinjoin()
++
+         return True
+ 
+ 
+@@ -227,6 +233,38 @@ class PSBTParser():
+         return True
+ 
+ 
++    def _detect_coinjoin(self):
++        # joinstr signer view: one ANYONECANPAY input + >=2 equal-value outputs.
++        self.is_coinjoin = False
++        self.coinjoin_summary = None
++
++        if self.num_inputs != 1:
++            return
++        sighash = self.psbt.inputs[0].sighash_type
++        if sighash is None or (sighash & 0x80) == 0:   # ANYONECANPAY bit
++            return
++
++        values = [vout.value for vout in self.psbt.tx.vout]
++        denomination = max(set(values), key=values.count)
++        participants = values.count(denomination)
++        if participants < 2:
++            return
++
++        my_input = self.input_amount
++        my_output = self.change_amount if self.change_data else None
++        my_fee = (my_input - my_output) if my_output is not None else None
++
++        self.is_coinjoin = True
++        self.coinjoin_summary = {
++            "my_input": my_input,
++            "my_output": my_output,
++            "my_fee": my_fee,
++            "num_participants": participants,
++            "denomination": denomination,
++            "total_outputs": len(self.psbt.tx.vout),
++        }
++
++
+     @staticmethod
+     def trim(tx):
+         trimmed_psbt = psbt.PSBT(tx.tx)
+diff --git a/src/seedsigner/views/psbt_views.py b/src/seedsigner/views/psbt_views.py
+index 475aef4..284c0fb 100644
+--- a/src/seedsigner/views/psbt_views.py
++++ b/src/seedsigner/views/psbt_views.py
+@@ -110,6 +110,13 @@ class PSBTOverviewView(View):
+         from seedsigner.gui.screens.psbt_screens import PSBTOverviewScreen
+         psbt_parser = self.controller.psbt_parser
+ 
++        # joinstr coinjoin PSBTs don't fit the normal spend overview; route to the
++        # coinjoin-aware verification view instead.
++        if psbt_parser.is_coinjoin:
++            if self.loading_screen:
++                self.loading_screen.stop()
++            return Destination(PSBTCoinjoinOverviewView)
++
+         change_data = psbt_parser.change_data
+         """
+             change_data = [
+@@ -164,6 +171,36 @@ class PSBTOverviewView(View):
+ 
+ 
+ 
++class PSBTCoinjoinOverviewView(View):
++    """joinstr coinjoin verification: show this peer's input/output/fee, then sign."""
++    APPROVE = ButtonOption("Sign my input")
++
++    def run(self):
++        from seedsigner.gui.screens.psbt_screens import PSBTCoinjoinOverviewScreen
++
++        psbt_parser: PSBTParser = self.controller.psbt_parser
++        if not psbt_parser or not psbt_parser.is_coinjoin:
++            return Destination(MainMenuView)
++
++        s = psbt_parser.coinjoin_summary
++        selected_menu_num = self.run_screen(
++            PSBTCoinjoinOverviewScreen,
++            num_participants=s["num_participants"],
++            my_input=s["my_input"],
++            my_output=s["my_output"],
++            my_fee=s["my_fee"],
++            denomination=s["denomination"],
++            button_data=[self.APPROVE],
++        )
++
++        if selected_menu_num == RET_CODE__BACK_BUTTON:
++            self.controller.psbt_seed = None
++            return Destination(BackStackView)
++
++        return Destination(PSBTFinalizeView)
++
++
++
+ class PSBTUnsupportedScriptTypeWarningView(View):
+     def run(self):
+         selected_menu_num = self.run_screen(
+@@ -540,7 +577,8 @@ class PSBTFinalizeView(View):
+         else:
+             # Sign PSBT
+             sig_cnt = PSBTParser.sig_count(psbt)
+-            psbt.sign_with(psbt_parser.root)
++            # sighash=None honors the PSBT's per-input sighash (joinstr uses 0x81)
++            psbt.sign_with(psbt_parser.root, sighash=None)
+             trimmed_psbt = PSBTParser.trim(psbt)
+ 
+             if sig_cnt == PSBTParser.sig_count(trimmed_psbt):

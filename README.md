@@ -28,7 +28,7 @@ rsync -a seedsigner-emulator/seedsigner/ seedsigner/src/seedsigner/
 cd seedsigner && git apply ../joinstr-seedsigner/patches/seedsigner-coinjoin.patch && cd ..
 ```
 
-Two one-line compat edits the patch can't carry (they touch emulator overlay files):
+The live emulator GUI (`record_demo.sh`, `run_emulator_shot.sh`, interactive `emulator_demo.py`) also needs two one-line compat edits to the emulator overlay files. These are not needed for the coinjoin demos (`demo_coinjoin.py`, `nostr_coinjoin.py`, `run_demo.sh`) or the PNG render (`screenshot_coinjoin.py`):
 
 - `seedsigner/src/seedsigner/gui/renderer.py`: add `is_screenshot_generator = False` to the `Renderer` class.
 - `seedsigner/src/seedsigner/hardware/camera.py`: add `class CameraConnectionError(Exception): pass`.

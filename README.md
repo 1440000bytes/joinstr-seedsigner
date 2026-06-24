@@ -48,7 +48,4 @@ bash run_demo.sh
 
 # render just the coinjoin verification screen to a PNG (SeedSigner's own renderer)
 python3 screenshot_coinjoin.py
-
-# record a video of the emulator window signing a coinjoin -> demo.mp4
-bash record_demo.sh
 ```
